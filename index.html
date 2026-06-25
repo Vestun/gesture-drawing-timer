@@ -222,6 +222,8 @@ function showImage(i) {
 function start() {
   if (!images.length) return alert("Add images first");
 
+  shuffleArray(images);
+
   timeLeft = parseInt(document.getElementById("timeInput").value);
   index = 0;
   showImage(index);
