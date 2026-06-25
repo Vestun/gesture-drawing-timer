@@ -46,13 +46,6 @@ button, input {
   font-size: 30px;
   margin: 10px;
 }
-
-@media (max-width: 600px) {
-  button, input {
-    font-size: 14px;
-    padding: 10px;
-  }
-}
 </style>
 </head>
 
@@ -61,11 +54,10 @@ button, input {
 <h2>🎨 Drawing Timer Pro</h2>
 
 <div id="dropzone">
-  Drag & drop images, ZIPs, or folders here<br>
-  <small>or use buttons below (mobile friendly)</small><br><br>
+  Drag & drop images, ZIPs, or folders here<br><br>
 
   <input type="file" id="fileInput" multiple>
-  <input type="file" id="folderInput" webkitdirectory directory multiple>
+  <input type="file" id="folderInput" webkitdirectory multiple>
 </div>
 
 <div class="controls">
@@ -82,7 +74,8 @@ button, input {
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
 <script>
-let images = [];
+let images = [];        // master library
+let sessionImages = []; // shuffled run order
 let index = 0;
 let timeLeft = 120;
 let interval = null;
@@ -90,7 +83,7 @@ let paused = false;
 
 const viewer = document.getElementById("viewer");
 
-/* ---------------- INPUT HANDLING ---------------- */
+/* ---------------- INPUT ---------------- */
 
 document.getElementById("fileInput").addEventListener("change", e => {
   handleFiles(e.target.files);
@@ -100,62 +93,16 @@ document.getElementById("folderInput").addEventListener("change", e => {
   handleFiles(e.target.files);
 });
 
-/* Drag & drop (folders + files + ZIP) */
+/* ---------------- DROP ---------------- */
+
 document.getElementById("dropzone").addEventListener("dragover", e => {
   e.preventDefault();
 });
 
 document.getElementById("dropzone").addEventListener("drop", async e => {
   e.preventDefault();
-
-  const items = e.dataTransfer.items;
-  if (items) {
-    for (let item of items) {
-      const entry = item.webkitGetAsEntry();
-      if (entry) await traverseEntry(entry);
-    }
-  } else {
-    handleFiles(e.dataTransfer.files);
-  }
+  handleFiles(e.dataTransfer.files);
 });
-
-/* ---------------- DIRECTORY RECURSION ---------------- */
-
-async function traverseEntry(entry) {
-  if (entry.isFile) {
-    entry.file(file => handleFiles([file]));
-    return;
-  }
-
-  if (entry.isDirectory) {
-    const reader = entry.createReader();
-
-    async function readAllEntries() {
-      return new Promise((resolve, reject) => {
-        let allEntries = [];
-
-        function readBatch() {
-          reader.readEntries(entries => {
-            if (entries.length === 0) {
-              resolve(allEntries);
-            } else {
-              allEntries.push(...entries);
-              readBatch();
-            }
-          }, reject);
-        }
-
-        readBatch();
-      });
-    }
-
-    const entries = await readAllEntries();
-
-    for (const child of entries) {
-      await traverseEntry(child);
-    }
-  }
-}
 
 /* ---------------- FILE HANDLING ---------------- */
 
@@ -171,7 +118,7 @@ async function handleFiles(files) {
   if (images.length && !viewer.innerHTML) showImage(0);
 }
 
-/* ---------------- ZIP SUPPORT ---------------- */
+/* ---------------- ZIP ---------------- */
 
 async function loadZip(file) {
   const zip = await JSZip.loadAsync(file);
@@ -179,27 +126,15 @@ async function loadZip(file) {
   for (let name in zip.files) {
     const entry = zip.files[name];
 
-    if (!entry.dir && isImage(name)) {
+    if (!entry.dir && /\.(jpg|jpeg|png|webp)$/i.test(name)) {
       const blob = await entry.async("blob");
-      const url = URL.createObjectURL(blob);
-      images.push(url);
+      images.push(URL.createObjectURL(blob));
     }
   }
 }
 
-function isImage(name) {
-  return /\.(jpg|jpeg|png|webp)$/i.test(name);
-}
+/* ---------------- IMAGE LOAD ---------------- */
 
-/* ---------------- IMAGE HANDLING ---------------- */
-
-  function shuffleArray(array) {
-  for (let i = array.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [array[i], array[j]] = [array[j], array[i]];
-  }
-}
-  
 function loadImage(file) {
   const reader = new FileReader();
   reader.onload = e => {
@@ -208,26 +143,33 @@ function loadImage(file) {
   reader.readAsDataURL(file);
 }
 
-function showImage(i) {
-  viewer.innerHTML = "";
-  if (!images.length) return;
+/* ---------------- SHUFFLE (Fisher-Yates) ---------------- */
 
-  const img = document.createElement("img");
-  img.src = images[i];
-  viewer.appendChild(img);
+function shuffle(array) {
+  const arr = [...array]; // IMPORTANT: copy so original stays intact
+
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+
+  return arr;
 }
 
-/* ---------------- TIMER ---------------- */
+/* ---------------- START ---------------- */
 
 function start() {
   if (!images.length) return alert("Add images first");
 
-  shuffleArray(images);
+  // NEW RANDOM ORDER EVERY TIME
+  sessionImages = shuffle(images);
 
-  timeLeft = parseInt(document.getElementById("timeInput").value);
-  updateTimer();
   index = 0;
+  timeLeft = parseInt(document.getElementById("timeInput").value);
+  paused = false;
+
   showImage(index);
+  updateTimer();
 
   if (interval) clearInterval(interval);
 
@@ -244,24 +186,38 @@ function start() {
   }, 1000);
 }
 
+/* ---------------- DISPLAY ---------------- */
+
+function showImage(i) {
+  viewer.innerHTML = "";
+  if (!sessionImages.length) return;
+
+  const img = document.createElement("img");
+  img.src = sessionImages[i];
+  viewer.appendChild(img);
+}
+
+/* ---------------- TIMER ---------------- */
+
 function updateTimer() {
   let m = Math.floor(timeLeft / 60);
   let s = timeLeft % 60;
+
   document.getElementById("timer").textContent =
     String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
 }
 
-/* ---------------- CONTROLS ---------------- */
+/* ---------------- NAV ---------------- */
 
 function nextImage() {
-  if (!images.length) return;
-  index = (index + 1) % images.length;
+  if (!sessionImages.length) return;
+  index = (index + 1) % sessionImages.length;
   showImage(index);
 }
 
 function prevImage() {
-  if (!images.length) return;
-  index = (index - 1 + images.length) % images.length;
+  if (!sessionImages.length) return;
+  index = (index - 1 + sessionImages.length) % sessionImages.length;
   showImage(index);
 }
 
