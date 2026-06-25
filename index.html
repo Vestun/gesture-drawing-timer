@@ -263,16 +263,27 @@ function updateTimer() {
 
 /* ---------------- NAV ---------------- */
 
+function resetTimer() {
+  timeLeft = parseInt(document.getElementById("timeInput").value);
+  updateTimer();
+}
+
 function next() {
   if (!sessionOrder.length) return;
+
   index = (index + 1) % sessionOrder.length;
   show(index);
+
+  resetTimer();
 }
 
 function prev() {
   if (!sessionOrder.length) return;
+
   index = (index - 1 + sessionOrder.length) % sessionOrder.length;
   show(index);
+
+  resetTimer();
 }
 </script>
 
