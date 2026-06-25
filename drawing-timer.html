@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drawing Timer Pro</title>
+
+<style>
+body {
+  font-family: Arial, sans-serif;
+  background: #111;
+  color: white;
+  margin: 0;
+  text-align: center;
+}
+
+h2 { margin: 10px; }
+
+#dropzone {
+  border: 3px dashed #555;
+  margin: 10px;
+  padding: 20px;
+  border-radius: 10px;
+}
+
+#viewer img {
+  max-width: 95%;
+  max-height: 65vh;
+  border-radius: 8px;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin: 10px;
+}
+
+button, input {
+  font-size: 16px;
+  padding: 8px;
+}
+
+#timer {
+  font-size: 30px;
+  margin: 10px;
+}
+
+@media (max-width: 600px) {
+  button, input {
+    font-size: 14px;
+    padding: 10px;
+  }
+}
+</style>
+</head>
+
+<body>
+
+<h2>🎨 Drawing Timer Pro</h2>
+
+<div id="dropzone">
+  Drag & drop images, ZIPs, or folders here<br>
+  <small>or use buttons below (mobile friendly)</small><br><br>
+
+  <input type="file" id="fileInput" multiple>
+  <input type="file" id="folderInput" webkitdirectory directory multiple>
+</div>
+
+<div class="controls">
+  ⏱ <input type="number" id="timeInput" value="120" min="5"> sec
+  <button onclick="start()">Start</button>
+  <button onclick="nextImage()">Next</button>
+  <button onclick="prevImage()">Prev</button>
+  <button onclick="togglePause()">Pause</button>
+</div>
+
+<div id="timer">00:00</div>
+<div id="viewer"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+<script>
+let images = [];
+let index = 0;
+let timeLeft = 120;
+let interval = null;
+let paused = false;
+
+const viewer = document.getElementById("viewer");
+
+/* ---------------- INPUT HANDLING ---------------- */
+
+document.getElementById("fileInput").addEventListener("change", e => {
+  handleFiles(e.target.files);
+});
+
+document.getElementById("folderInput").addEventListener("change", e => {
+  handleFiles(e.target.files);
+});
+
+/* Drag & drop (folders + files + ZIP) */
+document.getElementById("dropzone").addEventListener("dragover", e => {
+  e.preventDefault();
+});
+
+document.getElementById("dropzone").addEventListener("drop", async e => {
+  e.preventDefault();
+
+  const items = e.dataTransfer.items;
+  if (items) {
+    for (let item of items) {
+      const entry = item.webkitGetAsEntry();
+      if (entry) await traverseEntry(entry);
+    }
+  } else {
+    handleFiles(e.dataTransfer.files);
+  }
+});
+
+/* ---------------- DIRECTORY RECURSION ---------------- */
+
+async function traverseEntry(entry) {
+  if (entry.isFile) {
+    entry.file(file => handleFiles([file]));
+    return;
+  }
+
+  if (entry.isDirectory) {
+    const reader = entry.createReader();
+
+    async function readAllEntries() {
+      return new Promise((resolve, reject) => {
+        let allEntries = [];
+
+        function readBatch() {
+          reader.readEntries(entries => {
+            if (entries.length === 0) {
+              resolve(allEntries);
+            } else {
+              allEntries.push(...entries);
+              readBatch();
+            }
+          }, reject);
+        }
+
+        readBatch();
+      });
+    }
+
+    const entries = await readAllEntries();
+
+    for (const child of entries) {
+      await traverseEntry(child);
+    }
+  }
+}
+
+/* ---------------- FILE HANDLING ---------------- */
+
+async function handleFiles(files) {
+  for (let file of files) {
+    if (file.name.endsWith(".zip")) {
+      await loadZip(file);
+    } else if (file.type.startsWith("image/")) {
+      loadImage(file);
+    }
+  }
+
+  if (images.length && !viewer.innerHTML) showImage(0);
+}
+
+/* ---------------- ZIP SUPPORT ---------------- */
+
+async function loadZip(file) {
+  const zip = await JSZip.loadAsync(file);
+
+  for (let name in zip.files) {
+    const entry = zip.files[name];
+
+    if (!entry.dir && isImage(name)) {
+      const blob = await entry.async("blob");
+      const url = URL.createObjectURL(blob);
+      images.push(url);
+    }
+  }
+}
+
+function isImage(name) {
+  return /\.(jpg|jpeg|png|webp)$/i.test(name);
+}
+
+/* ---------------- IMAGE HANDLING ---------------- */
+
+function loadImage(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    images.push(e.target.result);
+  };
+  reader.readAsDataURL(file);
+}
+
+function showImage(i) {
+  viewer.innerHTML = "";
+  if (!images.length) return;
+
+  const img = document.createElement("img");
+  img.src = images[i];
+  viewer.appendChild(img);
+}
+
+/* ---------------- TIMER ---------------- */
+
+function start() {
+  if (!images.length) return alert("Add images first");
+
+  timeLeft = parseInt(document.getElementById("timeInput").value);
+  index = 0;
+  showImage(index);
+
+  if (interval) clearInterval(interval);
+
+  interval = setInterval(() => {
+    if (paused) return;
+
+    timeLeft--;
+    updateTimer();
+
+    if (timeLeft <= 0) {
+      nextImage();
+      timeLeft = parseInt(document.getElementById("timeInput").value);
+    }
+  }, 1000);
+}
+
+function updateTimer() {
+  let m = Math.floor(timeLeft / 60);
+  let s = timeLeft % 60;
+  document.getElementById("timer").textContent =
+    String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+}
+
+/* ---------------- CONTROLS ---------------- */
+
+function nextImage() {
+  if (!images.length) return;
+  index = (index + 1) % images.length;
+  showImage(index);
+}
+
+function prevImage() {
+  if (!images.length) return;
+  index = (index - 1 + images.length) % images.length;
+  showImage(index);
+}
+
+function togglePause() {
+  paused = !paused;
+}
+</script>
+
+</body>
+</html>
