@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Scalable Drawing Timer</title>
+<title>Balanced Drawing Timer</title>
 
 <style>
 body {
@@ -13,6 +13,8 @@ body {
   margin: 0;
   text-align: center;
 }
+
+h2 { margin: 10px; }
 
 #dropzone {
   border: 3px dashed #555;
@@ -49,10 +51,10 @@ button, input {
 
 <body>
 
-<h2>🎨 Scalable Drawing Timer</h2>
+<h2>🎨 Balanced Drawing Timer</h2>
 
 <div id="dropzone">
-  Drop folders, ZIPs, or images<br><br>
+  Drop images, folders, or ZIPs<br><br>
 
   <input type="file" id="fileInput" multiple>
   <input type="file" id="folderInput" webkitdirectory multiple>
@@ -71,12 +73,10 @@ button, input {
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
 <script>
-/* ---------------- CORE STORAGE (IMPORTANT CHANGE) ---------------- */
-// We store ONLY references, not loaded images
-let sources = []; // {type: 'file' | 'zip', data: File | Blob}
+/* ---------------- STORAGE ---------------- */
+let sources = [];
 let sessionOrder = [];
 let index = 0;
-
 let timeLeft = 120;
 let interval = null;
 let paused = false;
@@ -100,19 +100,35 @@ document.getElementById("dropzone").addEventListener("drop", e => {
   addFiles(e.dataTransfer.files);
 });
 
-/* ---------------- ADD FILES (NO LOADING) ---------------- */
+/* ---------------- GROUPING ---------------- */
+
+function getGroup(fileOrName) {
+  if (fileOrName.webkitRelativePath) {
+    return fileOrName.webkitRelativePath.split("/")[0];
+  }
+  if (typeof fileOrName === "string") {
+    return fileOrName.split("/")[0] || "zip";
+  }
+  return "root";
+}
+
+/* ---------------- FILE LOADING ---------------- */
 
 async function addFiles(files) {
   for (let file of files) {
     if (file.name.endsWith(".zip")) {
       await loadZip(file);
     } else if (file.type.startsWith("image/")) {
-      sources.push({ type: "file", data: file });
+      sources.push({
+        type: "file",
+        data: file,
+        group: getGroup(file)
+      });
     }
   }
 }
 
-/* ---------------- ZIP (STORE ONLY BLOBS, NOT BASE64) ---------------- */
+/* ---------------- ZIP ---------------- */
 
 async function loadZip(file) {
   const zip = await JSZip.loadAsync(file);
@@ -122,12 +138,17 @@ async function loadZip(file) {
 
     if (!entry.dir && /\.(jpg|jpeg|png|webp)$/i.test(name)) {
       const blob = await entry.async("blob");
-      sources.push({ type: "blob", data: blob });
+
+      sources.push({
+        type: "blob",
+        data: blob,
+        group: getGroup(name)
+      });
     }
   }
 }
 
-/* ---------------- SHUFFLE ---------------- */
+/* ---------------- RANDOM ---------------- */
 
 function shuffle(arr) {
   let a = [...arr];
@@ -138,24 +159,56 @@ function shuffle(arr) {
   return a;
 }
 
+/* ---------------- BALANCED SHUFFLE ---------------- */
+
+function balancedShuffle(items) {
+  const groups = {};
+
+  for (let item of items) {
+    if (!groups[item.group]) groups[item.group] = [];
+    groups[item.group].push(item);
+  }
+
+  for (let g in groups) {
+    groups[g] = shuffle(groups[g]);
+  }
+
+  const result = [];
+  let added = true;
+
+  while (added) {
+    added = false;
+
+    for (let g in groups) {
+      if (groups[g].length > 0) {
+        result.push(groups[g].pop());
+        added = true;
+      }
+    }
+  }
+
+  return shuffle(result);
+}
+
 /* ---------------- START ---------------- */
 
 function start() {
   if (!sources.length) return alert("Add images first");
 
-  sessionOrder = shuffle(sources); // ONLY REFERENCES SHUFFLED
-  index = 0;
+  sessionOrder = balancedShuffle(sources);
 
+  index = 0;
   timeLeft = parseInt(document.getElementById("timeInput").value);
   paused = false;
 
   show(index);
+  updateTimer();
 
   clearInterval(interval);
   interval = setInterval(tick, 1000);
 }
 
-/* ---------------- DISPLAY (LOAD ONE IMAGE ONLY) ---------------- */
+/* ---------------- DISPLAY ---------------- */
 
 function show(i) {
   viewer.innerHTML = "";
@@ -194,6 +247,7 @@ function tick() {
 function updateTimer() {
   let m = Math.floor(timeLeft / 60);
   let s = timeLeft % 60;
+
   document.getElementById("timer").textContent =
     String(m).padStart(2,"0") + ":" + String(s).padStart(2,"0");
 }
