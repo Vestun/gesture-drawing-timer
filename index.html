@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Drawing Timer Pro</title>
+<title>Scalable Drawing Timer</title>
 
 <style>
 body {
@@ -14,8 +14,6 @@ body {
   text-align: center;
 }
 
-h2 { margin: 10px; }
-
 #dropzone {
   border: 3px dashed #555;
   margin: 10px;
@@ -23,9 +21,9 @@ h2 { margin: 10px; }
   border-radius: 10px;
 }
 
-#viewer img {
+img {
   max-width: 95%;
-  max-height: 65vh;
+  max-height: 70vh;
   border-radius: 8px;
 }
 
@@ -51,21 +49,20 @@ button, input {
 
 <body>
 
-<h2>🎨 Drawing Timer Pro</h2>
+<h2>🎨 Scalable Drawing Timer</h2>
 
 <div id="dropzone">
-  Drag & drop images, ZIPs, or folders here<br><br>
+  Drop folders, ZIPs, or images<br><br>
 
   <input type="file" id="fileInput" multiple>
   <input type="file" id="folderInput" webkitdirectory multiple>
 </div>
 
 <div class="controls">
-  ⏱ <input type="number" id="timeInput" value="120" min="5"> sec
+  ⏱ <input type="number" id="timeInput" value="120">
   <button onclick="start()">Start</button>
-  <button onclick="nextImage()">Next</button>
-  <button onclick="prevImage()">Prev</button>
-  <button onclick="togglePause()">Pause</button>
+  <button onclick="next()">Next</button>
+  <button onclick="prev()">Prev</button>
 </div>
 
 <div id="timer">00:00</div>
@@ -74,9 +71,12 @@ button, input {
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
 <script>
-let images = [];        // master library
-let sessionImages = []; // shuffled run order
+/* ---------------- CORE STORAGE (IMPORTANT CHANGE) ---------------- */
+// We store ONLY references, not loaded images
+let sources = []; // {type: 'file' | 'zip', data: File | Blob}
+let sessionOrder = [];
 let index = 0;
+
 let timeLeft = 120;
 let interval = null;
 let paused = false;
@@ -86,39 +86,33 @@ const viewer = document.getElementById("viewer");
 /* ---------------- INPUT ---------------- */
 
 document.getElementById("fileInput").addEventListener("change", e => {
-  handleFiles(e.target.files);
+  addFiles(e.target.files);
 });
 
 document.getElementById("folderInput").addEventListener("change", e => {
-  handleFiles(e.target.files);
+  addFiles(e.target.files);
 });
 
-/* ---------------- DROP ---------------- */
+document.getElementById("dropzone").addEventListener("dragover", e => e.preventDefault());
 
-document.getElementById("dropzone").addEventListener("dragover", e => {
+document.getElementById("dropzone").addEventListener("drop", e => {
   e.preventDefault();
+  addFiles(e.dataTransfer.files);
 });
 
-document.getElementById("dropzone").addEventListener("drop", async e => {
-  e.preventDefault();
-  handleFiles(e.dataTransfer.files);
-});
+/* ---------------- ADD FILES (NO LOADING) ---------------- */
 
-/* ---------------- FILE HANDLING ---------------- */
-
-async function handleFiles(files) {
+async function addFiles(files) {
   for (let file of files) {
     if (file.name.endsWith(".zip")) {
       await loadZip(file);
     } else if (file.type.startsWith("image/")) {
-      loadImage(file);
+      sources.push({ type: "file", data: file });
     }
   }
-
-  if (images.length && !viewer.innerHTML) showImage(0);
 }
 
-/* ---------------- ZIP ---------------- */
+/* ---------------- ZIP (STORE ONLY BLOBS, NOT BASE64) ---------------- */
 
 async function loadZip(file) {
   const zip = await JSZip.loadAsync(file);
@@ -128,101 +122,94 @@ async function loadZip(file) {
 
     if (!entry.dir && /\.(jpg|jpeg|png|webp)$/i.test(name)) {
       const blob = await entry.async("blob");
-      images.push(URL.createObjectURL(blob));
+      sources.push({ type: "blob", data: blob });
     }
   }
 }
 
-/* ---------------- IMAGE LOAD ---------------- */
+/* ---------------- SHUFFLE ---------------- */
 
-function loadImage(file) {
-  const reader = new FileReader();
-  reader.onload = e => {
-    images.push(e.target.result);
-  };
-  reader.readAsDataURL(file);
-}
-
-/* ---------------- SHUFFLE (Fisher-Yates) ---------------- */
-
-function shuffle(array) {
-  const arr = [...array]; // IMPORTANT: copy so original stays intact
-
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
+function shuffle(arr) {
+  let a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    let j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
   }
-
-  return arr;
+  return a;
 }
 
 /* ---------------- START ---------------- */
 
 function start() {
-  if (!images.length) return alert("Add images first");
+  if (!sources.length) return alert("Add images first");
 
-  // NEW RANDOM ORDER EVERY TIME
-  sessionImages = shuffle(images);
-
+  sessionOrder = shuffle(sources); // ONLY REFERENCES SHUFFLED
   index = 0;
+
   timeLeft = parseInt(document.getElementById("timeInput").value);
   paused = false;
 
-  showImage(index);
-  updateTimer();
+  show(index);
 
-  if (interval) clearInterval(interval);
-
-  interval = setInterval(() => {
-    if (paused) return;
-
-    timeLeft--;
-    updateTimer();
-
-    if (timeLeft <= 0) {
-      nextImage();
-      timeLeft = parseInt(document.getElementById("timeInput").value);
-    }
-  }, 1000);
+  clearInterval(interval);
+  interval = setInterval(tick, 1000);
 }
 
-/* ---------------- DISPLAY ---------------- */
+/* ---------------- DISPLAY (LOAD ONE IMAGE ONLY) ---------------- */
 
-function showImage(i) {
+function show(i) {
   viewer.innerHTML = "";
-  if (!sessionImages.length) return;
 
-  const img = document.createElement("img");
-  img.src = sessionImages[i];
+  let src = sessionOrder[i];
+  if (!src) return;
+
+  let url;
+
+  if (src.type === "file") {
+    url = URL.createObjectURL(src.data);
+  } else {
+    url = URL.createObjectURL(src.data);
+  }
+
+  let img = document.createElement("img");
+  img.src = url;
+
   viewer.appendChild(img);
 }
 
 /* ---------------- TIMER ---------------- */
 
+function tick() {
+  if (paused) return;
+
+  timeLeft--;
+  updateTimer();
+
+  if (timeLeft <= 0) {
+    next();
+    timeLeft = parseInt(document.getElementById("timeInput").value);
+  }
+}
+
 function updateTimer() {
   let m = Math.floor(timeLeft / 60);
   let s = timeLeft % 60;
-
   document.getElementById("timer").textContent =
-    String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+    String(m).padStart(2,"0") + ":" + String(s).padStart(2,"0");
 }
 
 /* ---------------- NAV ---------------- */
 
-function nextImage() {
-  if (!sessionImages.length) return;
-  index = (index + 1) % sessionImages.length;
-  showImage(index);
+function next() {
+  if (!sessionOrder.length) return;
+  index = (index + 1) % sessionOrder.length;
+  show(index);
 }
 
-function prevImage() {
-  if (!sessionImages.length) return;
-  index = (index - 1 + sessionImages.length) % sessionImages.length;
-  showImage(index);
-}
-
-function togglePause() {
-  paused = !paused;
+function prev() {
+  if (!sessionOrder.length) return;
+  index = (index - 1 + sessionOrder.length) % sessionOrder.length;
+  show(index);
 }
 </script>
 
