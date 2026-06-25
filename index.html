@@ -8,7 +8,7 @@
 <style>
 body {
   font-family: Arial, sans-serif;
-  background: #111;
+  background: black;
   color: white;
   margin: 0;
   text-align: center;
@@ -24,9 +24,11 @@ h2 { margin: 10px; }
 }
 
 img {
-  max-width: 95%;
-  max-height: 70vh;
-  border-radius: 8px;
+  width: 100%;
+  height: 80vh;
+  object-fit: contain;
+  display: block;
+  margin: auto;
 }
 
 .controls {
@@ -62,9 +64,11 @@ button, input {
 
 <div class="controls">
   ⏱ <input type="number" id="timeInput" value="120">
+
   <button onclick="start()">Start</button>
   <button onclick="next()">Next</button>
   <button onclick="prev()">Prev</button>
+  <button onclick="toggleFullscreen()">Fullscreen</button>
 </div>
 
 <div id="timer">00:00</div>
@@ -73,7 +77,6 @@ button, input {
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
 <script>
-/* ---------------- STORAGE ---------------- */
 let sources = [];
 let sessionOrder = [];
 let index = 0;
@@ -83,15 +86,24 @@ let paused = false;
 
 const viewer = document.getElementById("viewer");
 
+/* ---------------- FULLSCREEN ---------------- */
+
+function toggleFullscreen() {
+  const el = document.documentElement;
+
+  if (!document.fullscreenElement) {
+    el.requestFullscreen().catch(err => {
+      console.log("Fullscreen failed:", err);
+    });
+  } else {
+    document.exitFullscreen();
+  }
+}
+
 /* ---------------- INPUT ---------------- */
 
-document.getElementById("fileInput").addEventListener("change", e => {
-  addFiles(e.target.files);
-});
-
-document.getElementById("folderInput").addEventListener("change", e => {
-  addFiles(e.target.files);
-});
+document.getElementById("fileInput").addEventListener("change", e => addFiles(e.target.files));
+document.getElementById("folderInput").addEventListener("change", e => addFiles(e.target.files));
 
 document.getElementById("dropzone").addEventListener("dragover", e => e.preventDefault());
 
@@ -100,19 +112,19 @@ document.getElementById("dropzone").addEventListener("drop", e => {
   addFiles(e.dataTransfer.files);
 });
 
-/* ---------------- GROUPING ---------------- */
+/* ---------------- GROUP ---------------- */
 
-function getGroup(fileOrName) {
-  if (fileOrName.webkitRelativePath) {
-    return fileOrName.webkitRelativePath.split("/")[0];
+function getGroup(file) {
+  if (file.webkitRelativePath) {
+    return file.webkitRelativePath.split("/")[0];
   }
-  if (typeof fileOrName === "string") {
-    return fileOrName.split("/")[0] || "zip";
+  if (typeof file === "string") {
+    return file.split("/")[0] || "zip";
   }
   return "root";
 }
 
-/* ---------------- FILE LOADING ---------------- */
+/* ---------------- FILES ---------------- */
 
 async function addFiles(files) {
   for (let file of files) {
@@ -148,7 +160,7 @@ async function loadZip(file) {
   }
 }
 
-/* ---------------- RANDOM ---------------- */
+/* ---------------- SHUFFLE ---------------- */
 
 function shuffle(arr) {
   let a = [...arr];
@@ -159,7 +171,7 @@ function shuffle(arr) {
   return a;
 }
 
-/* ---------------- BALANCED SHUFFLE ---------------- */
+/* ---------------- BALANCED ---------------- */
 
 function balancedShuffle(items) {
   const groups = {};
@@ -206,6 +218,9 @@ function start() {
 
   clearInterval(interval);
   interval = setInterval(tick, 1000);
+
+  // optional: auto fullscreen on start
+  toggleFullscreen();
 }
 
 /* ---------------- DISPLAY ---------------- */
@@ -216,13 +231,7 @@ function show(i) {
   let src = sessionOrder[i];
   if (!src) return;
 
-  let url;
-
-  if (src.type === "file") {
-    url = URL.createObjectURL(src.data);
-  } else {
-    url = URL.createObjectURL(src.data);
-  }
+  let url = URL.createObjectURL(src.data);
 
   let img = document.createElement("img");
   img.src = url;
